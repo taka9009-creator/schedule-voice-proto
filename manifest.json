@@ -1,0 +1,17 @@
+{
+  "name": "喋るスケジュール - Voice Scheduler",
+  "short_name": "喋る予定",
+  "description": "スマホで喋って一瞬でスケジュール作成",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#F7F5F0",
+  "theme_color": "#2B2824",
+  "icons": [
+    {
+      "src": "app_icon.jpg?v=2",
+      "sizes": "512x512",
+      "type": "image/jpeg",
+      "purpose": "any maskable"
+    }
+  ]
+}

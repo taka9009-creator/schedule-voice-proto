@@ -1,0 +1,19 @@
+# Netlify 設定ファイル
+# GitHub連携時に自動的に読み込まれます
+
+[build]
+  # 静的HTML/CSS/JSのためビルドコマンドは不要
+  command = ""
+  # 公開ディレクトリ (ルート)
+  publish = "."
+
+# キャッシュ対策ヘッダー設定 (スマホで更新が即座に反映されるようにする)
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"

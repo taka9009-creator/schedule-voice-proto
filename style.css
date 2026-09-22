@@ -1,0 +1,129 @@
+/* ==========================================================================
+   喋るスケジュール (Voice Scheduler) - スタイル定義
+   コンセプト: 「暖かくて静かな美術館のような雰囲気」
+   ========================================================================== */
+
+:root {
+  /* 美術館カラーパレット */
+  --bg-museum: #F7F5F0;          /* 生成り・漆喰のような背景 */
+  --card-museum: #FCFAF7;        /* 温かみのあるオフホワイト */
+  --card-subtle: #F2EDE4;        /* 控えめなカード背景 */
+  --stone-primary: #2B2824;      /* 深いチャコールブラック */
+  --stone-secondary: #6B655D;    /* 落ち着いたトープグレー */
+  --stone-muted: #9C9488;        /* 静かな淡いグレー */
+  --stone-border: #E6DFCF;       /* 和紙・額縁を思わせる境界線 */
+  
+  /* アクセントカラー */
+  --accent-brass: #AF894E;       /* 真鍮・ブラスゴールド */
+  --accent-brass-light: #F5EFE3; /* 淡いブラス */
+  --accent-terra: #B8654F;       /* テラコッタ */
+  --accent-sage: #6B8068;        /* セージグリーン */
+}
+
+/* 基本リセットとフォント指定 */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  font-family: 'Zen Kaku Gothic New', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background-color: var(--bg-museum);
+  color: var(--stone-primary);
+  line-height: 1.6;
+  letter-spacing: 0.03em;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* 美術館らしい上品な明朝体 */
+.font-serif-art {
+  font-family: 'Shippori Mincho', "Yu Mincho", serif;
+  letter-spacing: 0.06em;
+}
+
+/* 背景の微細な和紙テクスチャドット */
+.museum-canvas {
+  background-color: var(--bg-museum);
+  background-image: radial-gradient(#E5DFCF 0.8px, transparent 0.8px);
+  background-size: 22px 22px;
+}
+
+/* アプリメインカードの美しい影 */
+.museum-shadow {
+  box-shadow: 0 10px 30px -5px rgba(43, 40, 36, 0.05),
+              0 20px 25px -5px rgba(43, 40, 36, 0.02);
+}
+
+/* マイク録音時の静謐な呼吸パルスアニメーション */
+@keyframes museumPulse {
+  0% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(175, 137, 78, 0.3);
+  }
+  50% {
+    transform: scale(1.04);
+    box-shadow: 0 0 0 16px rgba(175, 137, 78, 0);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(175, 137, 78, 0);
+  }
+}
+
+.mic-recording {
+  animation: museumPulse 2.2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  border-color: var(--accent-terra) !important;
+}
+
+/* 音声波形インジケーターアニメーション */
+@keyframes waveMotion {
+  0%, 100% { height: 4px; }
+  50% { height: 26px; }
+}
+
+.wave-bar {
+  width: 3px;
+  background-color: var(--accent-brass);
+  border-radius: 9999px;
+  animation: waveMotion 1.2s ease-in-out infinite;
+}
+.wave-bar:nth-child(2) { animation-delay: 0.15s; }
+.wave-bar:nth-child(3) { animation-delay: 0.3s; }
+.wave-bar:nth-child(4) { animation-delay: 0.45s; }
+.wave-bar:nth-child(5) { animation-delay: 0.2s; }
+
+/* ふんわり表示されるフェードアニメーション */
+.fade-enter {
+  animation: museumFadeIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes museumFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 上品なスクロールバー */
+::-webkit-scrollbar {
+  width: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #DDD6C6;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #C4BAA6;
+}
