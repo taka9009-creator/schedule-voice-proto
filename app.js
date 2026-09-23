@@ -59,13 +59,13 @@ let schedules = JSON.parse(localStorage.getItem('saved_schedules')) || [
 let todos = JSON.parse(localStorage.getItem('saved_todos')) || [
   {
     id: "todo-init-1",
-    title: "商談後に見積書を作成",
+    title: "〇〇クリニック 見積書を作成",
     dueDate: "明日",
     completed: false
   },
   {
     id: "todo-init-2",
-    title: "田中先生へメール",
+    title: "〇〇クリニック 田中先生へメール",
     dueDate: "木曜日",
     completed: false
   }
@@ -694,7 +694,9 @@ async function callGeminiExtractAPI(text, apiKey) {
      発話中の「〜の件で相談」「事前に見積書を用意すること」「Zoom URL送付」「〜を持参」などの補足や背景、詳細情報はすべてこのmemoに格納してください（titleに入れないこと）。
 
 2. todos（やること・タスク）: 自分が実行する行動・作業の配列（0〜複数件）。
-   - title: 行動内容（例: "商談後に見積書を作成", "田中先生へメール"）
+   - title: 行動内容。★どの案件のタスクか一目で分かるように、顧客・相手名が判明している場合は必ずタイトルの先頭に対象顧客名を含めてください！
+     形式: 「[相手・顧客名] [タスク内容]」（例: "〇〇クリニック 見積書を作成", "〇〇クリニック 田中先生へメール", "〇〇クリニック 事前資料の確認"）
+     ※単に「見積書を作成」とするのではなく、必ず「〇〇クリニック 見積書を作成」のように顧客名を付与すること。相手がいない社内作業のみタスク名単体で可。
    - dueDate: 期限（例: "明日", "木曜日", "今週中" 等。指定なければ空文字）
 
 3. deal（案件・継続管理対象）: 顧客や商談案件に関するステータス。
@@ -794,6 +796,7 @@ ${JSON.stringify(currentPlan, null, 2)}
 3. 予定タイトル（title）は「【顧客・相手名】+【用件】」（例: "〇〇クリニック オンライン面談"）のように極めて簡潔かつ正確に保ってください。
    「〜の件」「〜について」などの余計な語句は含めず、詳細や補足情報はすべて memo に格納してください。
 4. 時間の変更（例: "15時にして"、"1時間遅らせて"）やTODOの追加・削除の指示にも柔軟に対応してください。
+   ★TODOのtitleには、どの案件のタスクか一目で分かるように必ず対象顧客名（例: "〇〇クリニック 見積書作成"）を含めてください。
 5. 必ず以下のJSONフォーマットのみで返答してください:
 {
   "schedule": {
@@ -924,7 +927,11 @@ function reviseLocally(text, currentPlan) {
   // 5. TODOの追加（例: 「TODOに見積送付を追加」「タスクに企画書作成を入れて」）
   const todoMatch = text.match(/(?:TODO|タスク|やること)(?:に)?(?:「([^」]+)」|([^\s、。]+?))(?:を?(?:追加|入れて|設定))/);
   if (todoMatch) {
-    const todoTitle = (todoMatch[1] || todoMatch[2]).trim();
+    let todoTitle = (todoMatch[1] || todoMatch[2]).trim();
+    const cust = revised.schedule.customer;
+    if (cust && !todoTitle.includes(cust)) {
+      todoTitle = `${cust} ${todoTitle}`;
+    }
     revised.todos.push({
       id: "todo-" + Date.now(),
       title: todoTitle,
@@ -959,8 +966,8 @@ function parseLocallyV2(text) {
         memo: "設計図第2版標準シナリオ：対面商談"
       },
       todos: [
-        { id: "todo-" + Date.now() + "-1", title: "商談後に見積書を作成", dueDate: "明日", completed: false },
-        { id: "todo-" + Date.now() + "-2", title: "田中先生へメール", dueDate: "木曜日", completed: false }
+        { id: "todo-" + Date.now() + "-1", title: "〇〇クリニック 見積書を作成", dueDate: "明日", completed: false },
+        { id: "todo-" + Date.now() + "-2", title: "〇〇クリニック 田中先生へメール", dueDate: "木曜日", completed: false }
       ],
       deal: {
         customer: "〇〇クリニック",
@@ -1073,19 +1080,21 @@ function parseLocallyV2(text) {
     type = "online";
   }
 
-  // TODO抽出 (営業・システム導入対応)
+  // TODO抽出 (営業・システム導入対応: 顧客名を必ず付与)
   const extractedTodos = [];
+  const custPrefix = customer ? `${customer} ` : "";
+
   if (text.includes("見積") || text.includes("資料") || text.includes("作成")) {
-    let todoTitle = "資料を作成";
-    if (text.includes("自動釣銭機") && text.includes("見積")) todoTitle = "自動釣銭機の見積書を作成";
-    else if (text.includes("HPS") && text.includes("見積")) todoTitle = "HPS連携の見積書を作成";
-    else if (text.includes("レセコン") && text.includes("見積")) todoTitle = "レセコン導入の見積書を作成";
-    else if (text.includes("見積")) todoTitle = "見積書を作成";
+    let todoAction = "資料を作成";
+    if (text.includes("自動釣銭機") && text.includes("見積")) todoAction = "自動釣銭機の見積書を作成";
+    else if (text.includes("HPS") && text.includes("見積")) todoAction = "HPS連携の見積書を作成";
+    else if (text.includes("レセコン") && text.includes("見積")) todoAction = "レセコン導入の見積書を作成";
+    else if (text.includes("見積")) todoAction = "見積書を作成";
 
     const dueMatch = text.match(/(木曜|金曜|月曜|火曜|水曜|明日|今週|来週)(?:まで|中)?/);
     extractedTodos.push({
       id: "todo-" + Date.now() + "-1",
-      title: todoTitle,
+      title: `${custPrefix}${todoAction}`,
       dueDate: dueMatch ? dueMatch[0] : "明日",
       completed: false
     });
@@ -1093,7 +1102,7 @@ function parseLocallyV2(text) {
   if (text.includes("現調") && (text.includes("報告") || text.includes("まとめ") || !text.includes("見積"))) {
     extractedTodos.push({
       id: "todo-" + Date.now() + "-report",
-      title: customer ? `${customer}の現調報告書を作成` : "現調チェックシートをまとめる",
+      title: customer ? `${customer} 現調報告書を作成` : "現調チェックシートをまとめる",
       dueDate: "当日中",
       completed: false
     });
@@ -1102,10 +1111,21 @@ function parseLocallyV2(text) {
     const dueMatch = text.match(/(木曜|金曜|月曜|火曜|水曜|明日|今週|来週)(?:まで|中)?/);
     extractedTodos.push({
       id: "todo-" + Date.now() + "-2",
-      title: customer ? `${customer}へ連絡・メール` : "関係者へメール連絡",
+      title: customer ? `${customer} 連絡・メール送付` : "関係者へメール連絡",
       dueDate: dueMatch ? dueMatch[0] : "今週中",
       completed: false
     });
+  }
+  if (text.includes("事前資料") || text.includes("仕様確認") || text.includes("確認")) {
+    const dueMatch = text.match(/(木曜|金曜|月曜|火曜|水曜|明日|今週|来週)(?:まで|中)?/);
+    if (!extractedTodos.some(t => t.title.includes("確認"))) {
+      extractedTodos.push({
+        id: "todo-" + Date.now() + "-3",
+        title: customer ? `${customer} 事前資料の確認` : "事前資料を確認",
+        dueDate: dueMatch ? dueMatch[0] : "前日",
+        completed: false
+      });
+    }
   }
 
   // 案件抽出 (営業・商談・現調・機器導入)
