@@ -475,6 +475,31 @@ function normalizeSpokenText(text) {
        .replace(/チームス/gi, 'Teams')
        .replace(/グーグルミート/gi, 'Google Meet');
 
+  // 5. よく使う営業・医療IT・店舗システム用語の認識精度向上 (Ver.3.3)
+  // (1) レセコン (診療報酬請求コンピュータ)
+  s = s.replace(/(?:れせこん|レセ今|レセ混|レスコン|セセコン)/gi, 'レセコン');
+
+  // (2) HPS (医療・調剤・営業システム連携等)
+  s = s.replace(/(?:エイチ\s*ピー\s*エス|えいちぴーえす|h\.?p\.?s\.?|8\s*ps|エッチピーエス)/gi, 'HPS');
+
+  // (3) 自動釣銭機 (クリニック・店舗・会計)
+  s = s.replace(/(?:自動(?:釣り?|つり?)(?:銭|線|せん)機|じどうつりせんき)/gi, '自動釣銭機');
+  s = s.replace(/(?:釣り銭機|つりせんき|釣せん機)/gi, '釣銭機');
+
+  // (4) 現調 (現場調査・現地調査)
+  s = s.replace(/(?:原調|減調|現長|げんちょう)/gi, '現調');
+  s = s.replace(/(?:現場調査|現地調査)/gi, '現調');
+
+  // (5) その他 医療・店舗DX・営業頻出用語
+  s = s.replace(/(?:でんしかるて|電カル|でんかる)/gi, '電子カルテ')
+       .replace(/(?:オンライン資格確認|おんし|オンシ)/gi, 'オンライン資格確認')
+       .replace(/(?:まいなほけんしょう|マイナ保険証)/gi, 'マイナ保険証')
+       .replace(/(?:きってぃんぐ)/gi, 'キッティング')
+       .replace(/(?:相見積もり|あいみつ|アイミツ|相見積)/gi, '相見積もり')
+       .replace(/(?:くろーじんぐ)/gi, 'クロージング')
+       .replace(/(?:ないらんかい)/gi, '内覧会')
+       .replace(/(?:でもき|デモ機)/gi, 'デモ機');
+
   return s.trim();
 }
 
@@ -629,6 +654,13 @@ async function callGeminiExtractAPI(text, apiKey) {
    - nextAction: 次に取るべきアクション（例: "見積作成"）
    - ballHolder: "self"（自分が次に行動） | "client"（先方の返信・確認待ち） | "other"（社内他担当やメーカー待ち）
    ※商談や顧客の言及が一切ない単独タスクの場合は null でも可。
+
+【営業・医療IT・店舗システム業界用語の理解ルール】:
+- 「レセコン」: 診療報酬請求コンピュータ。クリニックや薬局の重要システム。
+- 「HPS」: 医療・調剤・営業連携システム。
+- 「自動釣銭機」: クリニック・店舗の会計機。
+- 「現調（げんちょう）」: 現場調査・現地調査。現地に出向く作業のため、typeは必ず "offline"（対面・訪問）。
+- 「電子カルテ」「オンライン資格確認」「キッティング」「内覧会」等の専門用語も正確に抽出・活用すること。
 
 必ず以下のJSONフォーマットのみで返答してください:
 {
@@ -801,8 +833,8 @@ function parseLocallyV2(text) {
     .replace(/(?:午後|午前)?\d{1,2}時(?:\d{1,2}分|半)?(?:から|〜|-|~)?(?:(?:午後|午前)?\d{1,2}時(?:\d{1,2}分)?)?/g, ' ');
 
   const nameHonorific = textNoTime.match(/(?:[、。\s]|^|から|で)([A-Za-z0-9\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF\u3007]+?)(?:様|さん|氏|先生|社長|部長|ディレクター)(?:と|へ|に)?/);
-  const orgMatch = textNoTime.match(/(?:[、。\s]|^|から|で)([A-Za-z0-9\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF\u3007]+?(?:クリニック|医院|病院|株式会社|有限会社|合同会社|オフィス|スタジオ|チーム))(?:と|へ|に)?/);
-  const withMatch = textNoTime.match(/(?:[、。\s]|^|から|で)([A-Za-z0-9\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF\u3007]+?)と(?:ミーティング|商談|面談|打合せ|打ち合わせ|会議|ランチ|ご飯|収録|撮影|通話|電話|相談)/);
+  const orgMatch = textNoTime.match(/(?:[、。\s]|^|から|で)([A-Za-z0-9\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF\u3007]+?(?:クリニック|医院|病院|薬局|メディカル|株式会社|有限会社|合同会社|オフィス|スタジオ|チーム))(?:と|へ|に)?/);
+  const withMatch = textNoTime.match(/(?:[、。\s]|^|から|で)([A-Za-z0-9\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF\u3007]+?)と(?:ミーティング|商談|面談|打合せ|打ち合わせ|会議|ランチ|ご飯|収録|撮影|通話|電話|相談|現調)/);
 
   if (nameHonorific && nameHonorific[1]) {
     customer = nameHonorific[1].replace(/^(?:から|で|に|の|と|より|を)+/, '').trim();
@@ -813,7 +845,7 @@ function parseLocallyV2(text) {
   }
 
   let type = "online";
-  if (/(?:対面|訪問|現調|現場|現地|スタジオ|カフェ|ランチ|会食|行く|伺う|出張|オフライン|外出|秋葉原|渋谷|新宿|銀座|東京)/i.test(text)) {
+  if (/(?:対面|訪問|現調|現場|現地|設置|納品|デモ|キッティング|内覧会|スタジオ|カフェ|ランチ|会食|行く|伺う|出張|オフライン|外出|秋葉原|渋谷|新宿|銀座|東京)/i.test(text)) {
     type = "offline";
   } else if (/(?:社内|1on1|チーム|定例|役員|全社|事業計画|自社|作業|振り返り|朝会|夕会)/i.test(text)) {
     type = "internal";
@@ -821,13 +853,28 @@ function parseLocallyV2(text) {
     type = "online";
   }
 
-  // TODO抽出
+  // TODO抽出 (営業・システム導入対応)
   const extractedTodos = [];
   if (text.includes("見積") || text.includes("資料") || text.includes("作成")) {
+    let todoTitle = "資料を作成";
+    if (text.includes("自動釣銭機") && text.includes("見積")) todoTitle = "自動釣銭機の見積書を作成";
+    else if (text.includes("HPS") && text.includes("見積")) todoTitle = "HPS連携の見積書を作成";
+    else if (text.includes("レセコン") && text.includes("見積")) todoTitle = "レセコン導入の見積書を作成";
+    else if (text.includes("見積")) todoTitle = "見積書を作成";
+
+    const dueMatch = text.match(/(木曜|金曜|月曜|火曜|水曜|明日|今週|来週)(?:まで|中)?/);
     extractedTodos.push({
       id: "todo-" + Date.now() + "-1",
-      title: text.includes("見積") ? "見積書を作成" : "資料を作成",
-      dueDate: "明日",
+      title: todoTitle,
+      dueDate: dueMatch ? dueMatch[0] : "明日",
+      completed: false
+    });
+  }
+  if (text.includes("現調") && (text.includes("報告") || text.includes("まとめ") || !text.includes("見積"))) {
+    extractedTodos.push({
+      id: "todo-" + Date.now() + "-report",
+      title: customer ? `${customer}の現調報告書を作成` : "現調チェックシートをまとめる",
+      dueDate: "当日中",
       completed: false
     });
   }
@@ -841,9 +888,9 @@ function parseLocallyV2(text) {
     });
   }
 
-  // 案件抽出
+  // 案件抽出 (営業・商談・現調・機器導入)
   let deal = null;
-  if (customer || text.includes("商談") || text.includes("契約") || text.includes("現調")) {
+  if (customer || text.includes("商談") || text.includes("契約") || text.includes("現調") || text.includes("レセコン") || text.includes("自動釣銭機") || text.includes("HPS")) {
     let ball = "self";
     if (text.includes("返事待ち") || text.includes("連絡待ち") || text.includes("確認待ち")) {
       ball = "client";
@@ -851,9 +898,15 @@ function parseLocallyV2(text) {
       ball = "other";
     }
 
+    let defaultAction = "次回アクション検討";
+    if (text.includes("現調")) defaultAction = "現調実施・機器配置確認";
+    else if (text.includes("自動釣銭機")) defaultAction = "自動釣銭機の見積作成・提案";
+    else if (text.includes("HPS")) defaultAction = "HPS仕様確認・見積送付";
+    else if (text.includes("レセコン")) defaultAction = "レセコン提案書作成";
+
     deal = {
-      customer: customer || "新規案件",
-      nextAction: extractedTodos.length > 0 ? extractedTodos[0].title : "次回アクション検討",
+      customer: customer || (text.includes("現調") ? "現調先案件" : "商談案件"),
+      nextAction: extractedTodos.length > 0 ? extractedTodos[0].title : defaultAction,
       ballHolder: ball
     };
   }
@@ -867,11 +920,21 @@ function parseLocallyV2(text) {
     .replace(/^(?:の|で|に|へ|と|から)+/, '')
     .trim();
 
+  // 営業・現調タイトルの最適化
+  if (customer && (text.includes("現調") || text.includes("レセコン") || text.includes("自動釣銭機"))) {
+    const parts = [];
+    if (text.includes("レセコン")) parts.push("レセコン");
+    if (text.includes("自動釣銭機")) parts.push("自動釣銭機");
+    if (text.includes("HPS")) parts.push("HPS");
+    const itemStr = parts.length > 0 ? parts.join('・') + " " : "";
+    cleanTitle = `${customer} ${itemStr}${text.includes("現調") ? "現調" : "商談"}`;
+  }
+
   if (!cleanTitle) cleanTitle = customer ? `${customer}との予定` : "無題の予定";
 
   return {
     schedule: {
-      title: cleanTitle.length > 30 ? cleanTitle.substring(0, 30) + "..." : cleanTitle,
+      title: cleanTitle.length > 35 ? cleanTitle.substring(0, 35) + "..." : cleanTitle,
       date: targetDate,
       startTime,
       endTime,
