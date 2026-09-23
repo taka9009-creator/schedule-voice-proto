@@ -983,6 +983,13 @@ function populateTriCategoryForm(data) {
       saveBtnText.textContent = "この内容でまとめて登録";
     }
   }
+
+  // 4. ユーザーが項目を修正しようとタップ（フォーカス）した瞬間に自動保存を即時停止
+  const formInputs = document.querySelectorAll('#confirmationCard input, #confirmationCard select, #confirmationCard textarea');
+  formInputs.forEach(el => {
+    el.addEventListener('focus', cancelAutoSave);
+    el.addEventListener('input', cancelAutoSave);
+  });
 }
 
 function renderExtractedTodoList(todoList) {
@@ -1000,8 +1007,8 @@ function renderExtractedTodoList(todoList) {
     row.className = "flex items-center space-x-1.5 p-1.5 bg-[#FAF8F3] border border-[#EBE4D6] rounded-lg text-xs";
     row.innerHTML = `
       <span class="text-[#AF894E]">□</span>
-      <input type="text" value="${todo.title}" onchange="updatePendingTodo(${idx}, 'title', this.value)" class="flex-1 bg-transparent text-xs text-[#2B2824] focus:outline-none">
-      <input type="text" value="${todo.dueDate || ''}" placeholder="期限" onchange="updatePendingTodo(${idx}, 'dueDate', this.value)" class="w-16 bg-[#F3EDE2] text-[10px] px-1.5 py-0.5 rounded text-[#6B655D] focus:outline-none">
+      <input type="text" value="${todo.title}" onfocus="cancelAutoSave()" onchange="updatePendingTodo(${idx}, 'title', this.value)" class="flex-1 bg-transparent text-xs text-[#2B2824] focus:outline-none">
+      <input type="text" value="${todo.dueDate || ''}" placeholder="期限" onfocus="cancelAutoSave()" onchange="updatePendingTodo(${idx}, 'dueDate', this.value)" class="w-16 bg-[#F3EDE2] text-[10px] px-1.5 py-0.5 rounded text-[#6B655D] focus:outline-none">
       <button onclick="removePendingTodo(${idx})" class="text-[#B8654F] hover:text-red-700 text-xs px-1">✕</button>
     `;
     container.appendChild(row);
@@ -1514,13 +1521,13 @@ function startAutoSaveTimer() {
   }
 
   if (banner) banner.classList.remove('hidden');
-  autoSaveCountdown = 3;
-  if (textEl) textEl.textContent = `⚡ 3秒後に自動でまとめて登録...`;
+  autoSaveCountdown = 5;
+  if (textEl) textEl.textContent = `⚡ 5秒後に自動登録（項目タップで停止・修正可能）`;
 
   autoSaveTimer = setInterval(() => {
     autoSaveCountdown--;
     if (autoSaveCountdown > 0) {
-      if (textEl) textEl.textContent = `⚡ ${autoSaveCountdown}秒後に自動でまとめて登録...`;
+      if (textEl) textEl.textContent = `⚡ ${autoSaveCountdown}秒後に自動登録（タップで修正モードへ）`;
     } else {
       clearInterval(autoSaveTimer);
       autoSaveTimer = null;
