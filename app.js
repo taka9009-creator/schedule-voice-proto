@@ -320,7 +320,12 @@ function initSpeechRecognition() {
       speechFinalTranscript = '';
       if (speechSilenceTimer) clearTimeout(speechSilenceTimer);
       document.getElementById('transcriptText').textContent = "聴き取っています... どうぞお話しください";
-      document.getElementById('micStateHint').textContent = "話し終えると自動で解析されます（タップで今すぐ完了）";
+      const confCard = document.getElementById('confirmationCard');
+      if (confCard && !confCard.classList.contains('hidden') && pendingExtraction) {
+        document.getElementById('micStateHint').textContent = "🎙️ 直前の内容を声で修正できます（例: 『15時に変えて』『TODOに見積作成を追加』）";
+      } else {
+        document.getElementById('micStateHint').textContent = "話し終えると自動で解析されます（タップで今すぐ完了）";
+      }
     };
 
     recognition.onresult = (event) => {
@@ -554,6 +559,45 @@ async function processSpokenSchedule(text) {
 
   const analyzingCard = document.getElementById('aiAnalyzingCard');
   const confirmationCard = document.getElementById('confirmationCard');
+  const isCardVisible = confirmationCard && !confirmationCard.classList.contains('hidden');
+
+  // ★ 判定: 直前の整理結果に対する「音声による対話型再修正」モードか？
+  // 条件: 確認カードが表示中、または明らかな修正・変更指示（「〜に変えて」「15時に」「TODOに追加」「タイトルを〜」等）
+  const isRevisionIntent = /(?:変更|変えて|にして|ではなく|じゃなくて|キャンセル|追加して|消して|削除して|時間は|日時は|相手は|タイトルは|予定名は|さっきの|前回の|直前の|メモに|遅らせて|早めて)/.test(text);
+
+  if (pendingExtraction && (isCardVisible || isRevisionIntent)) {
+    document.getElementById('micStateHint').textContent = "🎙️ 音声指示をもとにAIが直前の内容を修正中...";
+    analyzingCard.classList.remove('hidden');
+    analyzingCard.classList.add('flex');
+    confirmationCard.classList.add('hidden');
+
+    const apiKey = localStorage.getItem('user_gemini_api_key');
+    let revisedResult = null;
+
+    if (apiKey) {
+      try {
+        revisedResult = await callGeminiRevisionAPI(text, pendingExtraction, apiKey);
+      } catch (err) {
+        console.warn("Gemini Revision API連携エラー、ローカル修正にフォールバック:", err);
+        revisedResult = reviseLocally(text, pendingExtraction);
+      }
+    } else {
+      await new Promise(r => setTimeout(r, 400));
+      revisedResult = reviseLocally(text, pendingExtraction);
+    }
+
+    analyzingCard.classList.add('hidden');
+    analyzingCard.classList.remove('flex');
+
+    pendingExtraction = revisedResult;
+    populateTriCategoryForm(revisedResult);
+
+    confirmationCard.classList.remove('hidden');
+    confirmationCard.classList.add('flex');
+    document.getElementById('micStateHint').textContent = "🎙️ 音声指示で内容を修正しました（内容を確認して登録）";
+    showToast("🎙️ 音声指示で内容を修正しました！");
+    return;
+  }
 
   analyzingCard.classList.remove('hidden');
   analyzingCard.classList.add('flex');
@@ -636,14 +680,18 @@ async function callGeminiExtractAPI(text, apiKey) {
 
 【抽出・分類の厳格ルール】:
 1. schedule（予定）: 日時・時間・場所・相手とのアポイントメント・約束。
-   - title: 予定名（指示語「〜の予定を入れて」等は除外）
+   - title: 予定名。極限まで「簡潔・正確」にすること！
+     形式: 「[相手・顧客名] [用件]」（例: "〇〇クリニック オンライン面談", "さくら医院 レセコン現調", "田中商事 打ち合わせ"）
+     社内作業の場合: "[用件]"（例: "社内定例会", "事業計画策定"）
+     ※【厳格禁止】: 「〜の件」「〜について」「〜の件で」「〜の予定」「〜をお願い」などの冗長な語尾・助詞や、「明日」「10時」などの日時はtitleに絶対に含めないでください。
    - date: YYYY-MM-DD（実在日付に計算変換）
    - startTime: HH:MM（24時間表記）
    - endTime: HH:MM（終了指定なければ1時間後）
    - customer: 相手・顧客名。相手がいない場合は空文字 ""（"関係者様"は禁止）
-   - type: "online"（Zoom等） | "offline"（対面・外出・訪問等） | "internal"（社内・作業等）
+   - type: "online"（Zoom等） | "offline"（対面・外出・訪問・現調等） | "internal"（社内・作業等）
    - isQuadrant2: 未来への投資・重要戦略タスクならtrue
-   - memo: 特記事項
+   - memo: 余分な情報・補足事項・詳細メモ。
+     発話中の「〜の件で相談」「事前に見積書を用意すること」「Zoom URL送付」「〜を持参」などの補足や背景、詳細情報はすべてこのmemoに格納してください（titleに入れないこと）。
 
 2. todos（やること・タスク）: 自分が実行する行動・作業の配列（0〜複数件）。
    - title: 行動内容（例: "商談後に見積書を作成", "田中先生へメール"）
@@ -721,6 +769,178 @@ async function callGeminiExtractAPI(text, apiKey) {
   }
 
   return parsed;
+}
+
+/**
+ * 音声による直前内容の対話型再修正 (Gemini API 版)
+ */
+async function callGeminiRevisionAPI(userInstruction, currentPlan, apiKey) {
+  const now = new Date();
+  const todayStr = getRelativeDateString(0);
+
+  const systemPrompt = `
+あなたは「スマホで喋って一瞬でスケジュール作成」の専属エグゼクティブAI秘書です。
+ユーザーは直前に作成・整理した【予定】【TODO】【案件】の内容に対して、声で追加の「修正・変更・追補」の指示を出しています。
+
+【現在の整理内容】:
+${JSON.stringify(currentPlan, null, 2)}
+
+【ユーザーの音声修正指示】: "${userInstruction}"
+現在日付: ${todayStr} (${now.toLocaleDateString('ja-JP', { weekday: 'long' })})
+
+【厳格な修正・出力ルール】:
+1. ユーザーの修正指示に従って、変更・追加が指定された項目のみを更新してください。
+2. 指示されていない項目は現在の値をそのまま正確に維持してください（消さないこと）。
+3. 予定タイトル（title）は「【顧客・相手名】+【用件】」（例: "〇〇クリニック オンライン面談"）のように極めて簡潔かつ正確に保ってください。
+   「〜の件」「〜について」などの余計な語句は含めず、詳細や補足情報はすべて memo に格納してください。
+4. 時間の変更（例: "15時にして"、"1時間遅らせて"）やTODOの追加・削除の指示にも柔軟に対応してください。
+5. 必ず以下のJSONフォーマットのみで返答してください:
+{
+  "schedule": {
+    "title": "簡潔な予定名",
+    "date": "YYYY-MM-DD",
+    "startTime": "HH:MM",
+    "endTime": "HH:MM",
+    "customer": "相手名または空文字",
+    "type": "online" または "offline" または "internal",
+    "isQuadrant2": false,
+    "memo": "詳細・補足情報"
+  },
+  "todos": [
+    { "title": "TODOタイトル", "dueDate": "期限" }
+  ],
+  "deal": {
+    "customer": "顧客名",
+    "nextAction": "次回アクション",
+    "ballHolder": "self"
+  }
+}
+`;
+
+  const endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
+
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: { 
+      "Content-Type": "application/json",
+      "x-goog-api-key": apiKey
+    },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: systemPrompt }] }],
+      generationConfig: {
+        responseMimeType: "application/json"
+      }
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`Gemini Revision API Status: ${response.status}`);
+  }
+
+  const result = await response.json();
+  const parsed = JSON.parse(result.candidates[0].content.parts[0].text);
+
+  if (parsed.todos && Array.isArray(parsed.todos)) {
+    parsed.todos = parsed.todos.map((t, idx) => ({
+      id: t.id || ("todo-" + Date.now() + "-" + idx),
+      title: t.title,
+      dueDate: t.dueDate || "",
+      completed: false
+    }));
+  } else {
+    parsed.todos = [];
+  }
+
+  return parsed;
+}
+
+/**
+ * 音声による直前内容の対話型再修正 (ローカルNLP フォールバック版)
+ */
+function reviseLocally(text, currentPlan) {
+  const revised = JSON.parse(JSON.stringify(currentPlan || {}));
+  if (!revised.schedule) {
+    revised.schedule = {
+      title: "予定", date: getRelativeDateString(0), startTime: "10:00", endTime: "11:00",
+      customer: "", type: "offline", isQuadrant2: false, memo: ""
+    };
+  }
+  if (!revised.todos) revised.todos = [];
+
+  // 1. 時間の変更（例: 「15時に変えて」「時間は午後2時から」「16時半に」「14時〜16時に変更」）
+  const timeRangeMatch = text.match(/(?:午後)?(\d{1,2})時(?:(\d{1,2})分)?(?:から|〜|-|~)(?:午後)?(\d{1,2})時(?:(\d{1,2})分)?/);
+  const timeSingleMatch = text.match(/(?:(午後|午前))?(\d{1,2})時(?:(\d{1,2})分|半)?/);
+
+  if (timeRangeMatch) {
+    let sH = parseInt(timeRangeMatch[1]);
+    const sM = timeRangeMatch[2] ? String(parseInt(timeRangeMatch[2])).padStart(2, '0') : '00';
+    let eH = parseInt(timeRangeMatch[3]);
+    const eM = timeRangeMatch[4] ? String(parseInt(timeRangeMatch[4])).padStart(2, '0') : '00';
+    if (text.includes("午後") && sH < 12) sH += 12;
+    if (text.includes("午後") && eH < 12) eH += 12;
+    revised.schedule.startTime = `${String(sH).padStart(2, '0')}:${sM}`;
+    revised.schedule.endTime = `${String(eH).padStart(2, '0')}:${eM}`;
+  } else if (timeSingleMatch) {
+    let sH = parseInt(timeSingleMatch[2]);
+    let sM = '00';
+    if (timeSingleMatch[3] === '半') sM = '30';
+    else if (timeSingleMatch[3]) sM = String(parseInt(timeSingleMatch[3])).padStart(2, '0');
+    if (timeSingleMatch[1] === '午後' && sH < 12) sH += 12;
+    revised.schedule.startTime = `${String(sH).padStart(2, '0')}:${sM}`;
+    let eH = (sH + 1) % 24;
+    revised.schedule.endTime = `${String(eH).padStart(2, '0')}:${sM}`;
+  }
+
+  // 2. 日付の変更（例: 「明後日に変えて」「来週月曜にして」「10月12日に」）
+  if (text.includes("明々後日")) revised.schedule.date = getRelativeDateString(3);
+  else if (text.includes("明後日")) revised.schedule.date = getRelativeDateString(2);
+  else if (text.includes("明日")) revised.schedule.date = getRelativeDateString(1);
+
+  const monthDayMatch = text.match(/(\d{1,2})月(\d{1,2})日/);
+  if (monthDayMatch) {
+    const yyyy = new Date().getFullYear();
+    const mm = String(parseInt(monthDayMatch[1])).padStart(2, '0');
+    const dd = String(parseInt(monthDayMatch[2])).padStart(2, '0');
+    revised.schedule.date = `${yyyy}-${mm}-${dd}`;
+  }
+
+  // 3. 形式の変更（例: 「対面に変えて」「オンラインにして」「社内に」）
+  if (/(?:対面|訪問|現調|オフライン)/.test(text)) {
+    revised.schedule.type = "offline";
+  } else if (/(?:オンライン|リモート|Zoom|Teams)/i.test(text)) {
+    revised.schedule.type = "online";
+  } else if (/(?:社内|自社)/.test(text)) {
+    revised.schedule.type = "internal";
+  }
+
+  // 4. タイトル変更（例: 「タイトルは〇〇にして」「〇〇の面談に変えて」）
+  const titleInstruction = text.match(/(?:タイトル|予定名)(?:は|を)?(?:「([^」]+)」|([^\s、。]+))/);
+  if (titleInstruction) {
+    let newT = (titleInstruction[1] || titleInstruction[2]).trim();
+    newT = newT.replace(/(?:の件で(?:相談|面談|打合せ)?|の件|について|の予定)+$/, '').trim();
+    revised.schedule.title = newT;
+  }
+
+  // 5. TODOの追加（例: 「TODOに見積送付を追加」「タスクに企画書作成を入れて」）
+  const todoMatch = text.match(/(?:TODO|タスク|やること)(?:に)?(?:「([^」]+)」|([^\s、。]+?))(?:を?(?:追加|入れて|設定))/);
+  if (todoMatch) {
+    const todoTitle = (todoMatch[1] || todoMatch[2]).trim();
+    revised.todos.push({
+      id: "todo-" + Date.now(),
+      title: todoTitle,
+      dueDate: "明日",
+      completed: false
+    });
+  }
+
+  // 6. メモの追加（例: 「メモに事前資料持参と書いて」「メモはZoom URL送付」）
+  const memoMatch = text.match(/(?:メモ|備考)(?:に|は)?(?:「([^」]+)」|([^\s、。]+?))(?:と?(?:書いて|入れて|追加)?)/);
+  if (memoMatch) {
+    const memoContent = (memoMatch[1] || memoMatch[2]).trim();
+    revised.schedule.memo = revised.schedule.memo ? `${revised.schedule.memo} / ${memoContent}` : memoContent;
+  }
+
+  return revised;
 }
 
 function parseLocallyV2(text) {
@@ -911,37 +1131,72 @@ function parseLocallyV2(text) {
     };
   }
 
+  // 余分な語句（の件、について等）の完全除去とメモ退避
+  let memoParts = [];
+
+  // 「〜の件で〇〇」「事前に〇〇」「持ち物〇〇」「Zoom」「資料」等の補足をメモへ退避
+  const detailMatches = text.match(/(?:の件で[^\s、。]+|事前に[^\s、。]+|持ち物[^\s、。]+|持参[^\s、。]+|URL[^\s、。]+|確認[^\s、。]+)/g);
+  if (detailMatches) {
+    memoParts.push(...detailMatches);
+  }
+
   let cleanTitle = text
     .replace(/(?:来週|今週)?(?:の)?(?:月|火|水|木|金|土|日)曜(?:日)?/g, '')
     .replace(/(?:明日|明後日|明々後日|今日|\d{1,2}月\d{1,2}日)/g, '')
     .replace(/(?:午後|午前)?\d{1,2}時(?:\d{1,2}分|半)?(?:から|〜|-|~)?(?:(?:午後|午前)?\d{1,2}時(?:\d{1,2}分)?)?/g, '')
     .replace(/(?:の予定を入れて|の予定追加|予定を入れて|予定を追加して|登録して|カレンダーに入れて|お願い)/g, '')
+    .replace(/(?:の件で(?:相談|面談|打合せ|商談|連絡)?|の件|について|の予定)+/g, '') // ★「〜の件」「〜について」を完全除去！
     .trim()
     .replace(/^(?:の|で|に|へ|と|から)+/, '')
     .trim();
 
-  // 営業・現調タイトルの最適化
-  if (customer && (text.includes("現調") || text.includes("レセコン") || text.includes("自動釣銭機"))) {
+  // タイトルを「【相手/顧客名】+【用件】」形式で極限まで簡潔・正確に整形
+  if (customer) {
+    let action = "";
+    if (text.includes("現調")) action = "現調";
+    else if (text.includes("オンライン面談") || (text.includes("面談") && type === "online")) action = "オンライン面談";
+    else if (text.includes("対面面談") || (text.includes("面談") && type === "offline")) action = "対面面談";
+    else if (text.includes("面談")) action = "面談";
+    else if (text.includes("商談")) action = "商談";
+    else if (text.includes("打ち合わせ") || text.includes("打合せ") || text.includes("ミーティング")) action = "打ち合わせ";
+    else if (text.includes("会議") || text.includes("定例")) action = "定例会議";
+    else if (text.includes("デモ")) action = "デモ実演";
+    else if (text.includes("キッティング")) action = "キッティング作業";
+    else if (text.includes("内覧会")) action = "内覧会";
+    else if (text.includes("ランチ") || text.includes("会食")) action = "会食";
+    else action = "訪問・面談";
+
     const parts = [];
     if (text.includes("レセコン")) parts.push("レセコン");
     if (text.includes("自動釣銭機")) parts.push("自動釣銭機");
     if (text.includes("HPS")) parts.push("HPS");
     const itemStr = parts.length > 0 ? parts.join('・') + " " : "";
-    cleanTitle = `${customer} ${itemStr}${text.includes("現調") ? "現調" : "商談"}`;
+
+    cleanTitle = `${customer} ${itemStr}${action}`;
+  } else {
+    // 相手なし社内タスクの場合
+    if (text.includes("事業計画")) cleanTitle = "事業計画策定";
+    else if (text.includes("役員会議") || text.includes("役員会")) cleanTitle = "緊急役員会議";
+    else if (text.includes("定例")) cleanTitle = "社内定例会";
+    else if (!cleanTitle) cleanTitle = "社内作業";
   }
 
-  if (!cleanTitle) cleanTitle = customer ? `${customer}との予定` : "無題の予定";
+  // 余剰テキストがあればメモへ
+  let finalMemo = memoParts.join(' / ');
+  if (!finalMemo && text.includes("の件")) {
+    finalMemo = "発話補足: " + text.replace(/^(?:明日|明後日|来週).+?(?:時|日)/, '').trim();
+  }
 
   return {
     schedule: {
-      title: cleanTitle.length > 35 ? cleanTitle.substring(0, 35) + "..." : cleanTitle,
+      title: cleanTitle,
       date: targetDate,
       startTime,
       endTime,
       customer,
       type,
       isQuadrant2: false,
-      memo: ""
+      memo: finalMemo
     },
     todos: extractedTodos,
     deal
